@@ -41,7 +41,7 @@ type ResolverRoot interface {
 }
 
 type DirectiveRoot struct {
-	Gorm func(ctx context.Context, obj interface{}, next graphql.Resolver, gorm *string) (res interface{}, err error)
+	IsDatabaseField func(ctx context.Context, obj interface{}, next graphql.Resolver, fieldName *string) (res interface{}, err error)
 }
 
 type ComplexityRoot struct {
@@ -213,21 +213,16 @@ func (ec *executionContext) introspectType(name string) (*introspection.Type, er
 }
 
 var sources = []*ast.Source{
-	{Name: "graph/schema.graphql", Input: `# GraphQL schema example
-#
-# https://gqlgen.com/getting-started/
-
-
-
+	{Name: "graph/schema.graphql", Input: `
 type Todo {
-  id: ID!
-  text: String! @gorm(gorm: "VARCHAR(255)")
-  done: Boolean!
+  id: ID! 
+  text: String! @isDatabaseField
+  done: Boolean! @isDatabaseField(fieldName: "is_done")
   user: User!
 }
 
 type User {
-  id: ID!
+  id: ID! 
   name: String!
 }
 
@@ -243,15 +238,13 @@ input NewTodo {
 type Mutation {
   createTodo(input: NewTodo!): Todo!
 }`, BuiltIn: false},
-	{Name: "kitakerja/directives.graphql", Input: `
+	{Name: "todo/directives.graphql", Input: `
 			directive @goField(
 				forceResolver: Boolean
 				name: String
 			  ) on INPUT_FIELD_DEFINITION | FIELD_DEFINITION
 
-			  directive @gorm(
-				gorm: String,
-			) on OBJECT | FIELD_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION | ENUM | INPUT_OBJECT | ARGUMENT_DEFINITION
+			  directive @isDatabaseField(fieldName: String) on OBJECT | FIELD_DEFINITION
 
 			scalar Time
 		`, BuiltIn: false},
@@ -262,18 +255,18 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 
 // region    ***************************** args.gotpl *****************************
 
-func (ec *executionContext) dir_gorm_args(ctx context.Context, rawArgs map[string]interface{}) (map[string]interface{}, error) {
+func (ec *executionContext) dir_isDatabaseField_args(ctx context.Context, rawArgs map[string]interface{}) (map[string]interface{}, error) {
 	var err error
 	args := map[string]interface{}{}
 	var arg0 *string
-	if tmp, ok := rawArgs["gorm"]; ok {
-		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("gorm"))
+	if tmp, ok := rawArgs["fieldName"]; ok {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("fieldName"))
 		arg0, err = ec.unmarshalOString2ᚖstring(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
 	}
-	args["gorm"] = arg0
+	args["fieldName"] = arg0
 	return args, nil
 }
 
@@ -550,14 +543,10 @@ func (ec *executionContext) _Todo_text(ctx context.Context, field graphql.Collec
 			return obj.Text, nil
 		}
 		directive1 := func(ctx context.Context) (interface{}, error) {
-			gorm, err := ec.unmarshalOString2ᚖstring(ctx, "VARCHAR(255)")
-			if err != nil {
-				return nil, err
+			if ec.directives.IsDatabaseField == nil {
+				return nil, errors.New("directive isDatabaseField is not implemented")
 			}
-			if ec.directives.Gorm == nil {
-				return nil, errors.New("directive gorm is not implemented")
-			}
-			return ec.directives.Gorm(ctx, obj, directive0, gorm)
+			return ec.directives.IsDatabaseField(ctx, obj, directive0, nil)
 		}
 
 		tmp, err := directive1(rctx)
@@ -604,8 +593,32 @@ func (ec *executionContext) _Todo_done(ctx context.Context, field graphql.Collec
 
 	ctx = graphql.WithFieldContext(ctx, fc)
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
-		ctx = rctx // use context from middleware stack in children
-		return obj.Done, nil
+		directive0 := func(rctx context.Context) (interface{}, error) {
+			ctx = rctx // use context from middleware stack in children
+			return obj.Done, nil
+		}
+		directive1 := func(ctx context.Context) (interface{}, error) {
+			fieldName, err := ec.unmarshalOString2ᚖstring(ctx, "is_done")
+			if err != nil {
+				return nil, err
+			}
+			if ec.directives.IsDatabaseField == nil {
+				return nil, errors.New("directive isDatabaseField is not implemented")
+			}
+			return ec.directives.IsDatabaseField(ctx, obj, directive0, fieldName)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(bool); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be bool`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)

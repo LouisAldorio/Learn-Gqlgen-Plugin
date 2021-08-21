@@ -1,18 +1,13 @@
-# GraphQL schema example
-#
-# https://gqlgen.com/getting-started/
-
-
 
 type Todo {
-  id: ID!
-  text: String! @gorm(gorm: "VARCHAR(255)")
-  done: Boolean!
+  id: ID! 
+  text: String! @isDatabaseField
+  done: Boolean! @isDatabaseField(fieldName: "is_done")
   user: User!
 }
 
 type User {
-  id: ID!
+  id: ID! 
   name: String!
 }
 

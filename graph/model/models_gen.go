@@ -9,8 +9,8 @@ type NewTodo struct {
 
 type Todo struct {
 	ID   string `json:"id" `
-	Text string `json:"text" gorm:"VARCHAR(255)"`
-	Done bool   `json:"done" `
+	Text string `json:"text" gorm:"column:text"`
+	Done bool   `json:"done" gorm:"column:is_done"`
 	User *User  `json:"user" `
 }
 

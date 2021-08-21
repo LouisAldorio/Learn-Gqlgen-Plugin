@@ -14,7 +14,6 @@ import (
 type BuildMutateHook = func(b *ModelBuild) *ModelBuild
 
 func defaultBuildMutateHook(b *ModelBuild) *ModelBuild {
-	fmt.Println("a")
 	return b
 }
 
@@ -167,12 +166,14 @@ func (m *Plugin) MutateConfig(cfg *config.Config) error {
 				}
 
 				gormType := ""
-				directive := field.Directives.ForName("gorm")
+				directive := field.Directives.ForName("isDatabaseField")
 				if directive != nil {
-					arg := directive.Arguments.ForName("gorm")
+					arg := directive.Arguments.ForName("fieldName")
 					if arg != nil {
-						gormType = fmt.Sprintf("gorm:\"%s\"", arg.Value.Raw)
-					}
+						gormType = fmt.Sprintf(`gorm:"column:%s"`, arg.Value.Raw)
+					}else {
+						gormType = fmt.Sprintf(`gorm:"column:%s"`, field.Name)
+					}					
 				}
 
 				it.Fields = append(it.Fields, &Field{
@@ -224,16 +225,99 @@ func (m *Plugin) MutateConfig(cfg *config.Config) error {
 		return nil
 	}
 
-	if m.MutateHook != nil {
-		b = m.MutateHook(b)
-	}
-
 	return templates.Render(templates.Options{
 		PackageName:     cfg.Model.Package,
 		Filename:        cfg.Model.Filename,
 		Data:            b,
 		GeneratedHeader: true,
 		Packages:        cfg.Packages,
+		Template: `
+			{{ reserveImport "context"  }}
+			{{ reserveImport "fmt"  }}
+			{{ reserveImport "io"  }}
+			{{ reserveImport "strconv"  }}
+			{{ reserveImport "time"  }}
+			{{ reserveImport "sync"  }}
+			{{ reserveImport "errors"  }}
+			{{ reserveImport "bytes"  }}
+			
+			{{ reserveImport "github.com/vektah/gqlparser/v2" }}
+			{{ reserveImport "github.com/vektah/gqlparser/v2/ast" }}
+			{{ reserveImport "github.com/99designs/gqlgen/graphql" }}
+			{{ reserveImport "github.com/99designs/gqlgen/graphql/introspection" }}
+			
+			{{- range $model := .Interfaces }}
+				{{ with .Description }} {{.|prefixLines "// "}} {{ end }}
+				type {{.Name|go }} interface {
+					Is{{.Name|go }}()
+				}
+			{{- end }}
+			
+			{{ range $model := .Models }}
+				{{with .Description }} {{.|prefixLines "// "}} {{end}}
+				type {{ .Name|go }} struct {
+					{{- range $field := .Fields }}
+						{{- with .Description }}
+							{{.|prefixLines "// "}}
+						{{- end}}
+						{{ $field.Name|go }} {{$field.Type | ref}}` + "`{{$field.Tag}} {{$field.Gorm}}`" + `
+					{{- end }}
+				}
+			
+				{{- range $iface := .Implements }}
+					func ({{ $model.Name|go }}) Is{{ $iface|go }}() {}
+				{{- end }}
+			{{- end}}
+			
+			{{ range $enum := .Enums }}
+				{{ with .Description }} {{.|prefixLines "// "}} {{end}}
+				type {{.Name|go }} string
+				const (
+				{{- range $value := .Values}}
+					{{- with .Description}}
+						{{.|prefixLines "// "}}
+					{{- end}}
+					{{ $enum.Name|go }}{{ .Name|go }} {{$enum.Name|go }} = {{.Name|quote}}
+				{{- end }}
+				)
+			
+				var All{{.Name|go }} = []{{ .Name|go }}{
+				{{- range $value := .Values}}
+					{{$enum.Name|go }}{{ .Name|go }},
+				{{- end }}
+				}
+			
+				func (e {{.Name|go }}) IsValid() bool {
+					switch e {
+					case {{ range $index, $element := .Values}}{{if $index}},{{end}}{{ $enum.Name|go }}{{ $element.Name|go }}{{end}}:
+						return true
+					}
+					return false
+				}
+			
+				func (e {{.Name|go }}) String() string {
+					return string(e)
+				}
+			
+				func (e *{{.Name|go }}) UnmarshalGQL(v interface{}) error {
+					str, ok := v.(string)
+					if !ok {
+						return fmt.Errorf("enums must be strings")
+					}
+			
+					*e = {{ .Name|go }}(str)
+					if !e.IsValid() {
+						return fmt.Errorf("%s is not a valid {{ .Name }}", str)
+					}
+					return nil
+				}
+			
+				func (e {{.Name|go }}) MarshalGQL(w io.Writer) {
+					fmt.Fprint(w, strconv.Quote(e.String()))
+				}
+			
+			{{- end }}
+		`,
 	})
 }
 
@@ -244,16 +328,14 @@ func isStruct(t types.Type) bool {
 
 func (r *Plugin) InjectSourceEarly() *ast.Source {
 	return &ast.Source{
-		Name: "kitakerja/directives.graphql",
+		Name: "todo/directives.graphql",
 		Input: `
 			directive @goField(
 				forceResolver: Boolean
 				name: String
 			  ) on INPUT_FIELD_DEFINITION | FIELD_DEFINITION
 
-			  directive @gorm(
-				gorm: String,
-			) on OBJECT | FIELD_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION | ENUM | INPUT_OBJECT | ARGUMENT_DEFINITION
+			  directive @isDatabaseField(fieldName: String) on OBJECT | FIELD_DEFINITION
 
 			scalar Time
 		`,
